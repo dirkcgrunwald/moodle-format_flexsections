@@ -1137,6 +1137,11 @@ class format_flexsections extends format_base {
     public function course_content_header() {
         global $PAGE;
 
+	//
+	// Disable "back to" because this is done by breadcrumbs...DCG
+	//
+        return parent::course_content_header();
+
         // if we are on course view page for particular section, return 'back to parent' control
         if ($this->get_viewed_section()) {
             $section = $this->get_section($this->get_viewed_section());
