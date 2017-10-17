@@ -32,7 +32,7 @@ require_once($CFG->dirroot.'/course/format/renderer.php');
  * @copyright 2012 Marina Glancy
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-class format_flexsections_renderer extends plugin_renderer_base {
+class format_flexsections_renderer extends format_section_renderer_base {
     /** @var core_course_renderer Stores instances of core_course_renderer */
     protected $courserenderer = null;
 
@@ -46,6 +46,31 @@ class format_flexsections_renderer extends plugin_renderer_base {
         parent::__construct($page, $target);
         $this->courserenderer = $page->get_renderer('core', 'course');
     }
+
+    /**
+     * Generate the starting container html for a list of sections
+     * @return string HTML to output.
+     */
+    protected function start_section_list() {
+        return html_writer::start_tag('ul', array('class' => 'flexsections'));
+    }
+
+    /**
+     * Generate the closing container html for a list of sections
+     * @return string HTML to output.
+     */
+    protected function end_section_list() {
+        return html_writer::end_tag('ul');
+    }
+
+    /**
+     * Generate the title for this section page
+     * @return string the page title
+     */
+    protected function page_title() {
+        return get_string('flexsectionsoutline');
+    }
+
 
     /**
      * Generate the section title (with link if section is collapsed)
@@ -163,6 +188,7 @@ class format_flexsections_renderer extends plugin_renderer_base {
         } else {
             echo html_writer::tag('div', '', array('class' => 'summary nosummary'));
         }
+
         // display section contents (activities and subsections)
         if ($contentvisible && ($section->collapsed == FORMAT_FLEXSECTIONS_EXPANDED || !$level)) {
             // display resources and activities
@@ -174,6 +200,8 @@ class format_flexsections_renderer extends plugin_renderer_base {
                 }
                 echo $this->courserenderer->course_section_add_cm_control($course, $sectionnum, $sr);
             }
+
+
             // display subsections
             $children = course_get_format($course)->get_subsections($sectionnum);
             if (!empty($children) || $movingsection) {
