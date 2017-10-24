@@ -68,7 +68,7 @@ class format_flexsections_renderer extends format_section_renderer_base {
      * @return string the page title
      */
     protected function page_title() {
-        return get_string('flexsectionsoutline');
+        return get_string('topicoutline');
     }
 
 
@@ -113,6 +113,112 @@ class format_flexsections_renderer extends format_section_renderer_base {
         return format_text($summarytext, $section->summaryformat, $options);
     }
 
+
+    public function print_section0($course, $contentvisible = True) {
+      global $PAGE;
+
+      $modinfo = get_fast_modinfo($course);
+      $course = course_get_format($course)->get_course();
+      $section = course_get_format($course)->get_section(0);
+      $context = context_course::instance($course->id);
+
+      // 0-section is displayed a little different then the others
+      if ($section->summary or !empty($modinfo->sections[0]) or $PAGE->user_is_editing()) {
+	echo $this->section_header($section, $course, false, 0);
+	echo $this->courserenderer->course_section_cm_list($course, $section, 0);
+	echo $this->courserenderer->course_section_add_cm_control($course, 0, 0);
+	echo $this->section_footer();
+      }
+    }
+
+    /**
+     * Output the html for a multiple section page
+     *
+     * @param stdClass $course The course entry from DB
+     * @param array $sections (argument not used)
+     * @param array $mods (argument not used)
+     * @param array $modnames (argument not used)
+     * @param array $modnamesused (argument not used)
+     */
+    public function print_sections_recursive($course, $sections) {
+        global $PAGE;
+
+	echo "<pre>" ; echo "Print sections: "; print_r($sections); echo "</pre>";
+
+        $modinfo = get_fast_modinfo($course);
+        $course = course_get_format($course)->get_course();
+
+	$movingsection = course_get_format($course)->is_moving_section();
+        $numsections = course_get_format($course)->get_last_section_number();
+
+        foreach ($sections as $thissection) {
+	  $sectionnum = $thissection->section;
+	  if ($sectionnum == 0) {
+	    // Should not be displayed here, only at start
+	    continue;
+	  }
+	  if ($sectionnum > $numsections) {
+	    // activities inside this section are 'orphaned', this section will be printed as 'stealth' below
+	    continue;
+	  }
+	  // Show the section if the user is permitted to access it, OR if it's not available
+	  // but there is some available info text which explains the reason & should display.
+	  $showsection = $thissection->uservisible ||
+	    ($thissection->visible && !$thissection->available &&
+	     !empty($thissection->availableinfo));
+	  if (!$showsection) {
+	    // If the hiddensections option is set to 'show hidden sections in collapsed
+	    // form', then display the hidden section message - UNLESS the section is
+	    // hidden by the availability system, which is set to hide the reason.
+	    if (!$course->hiddensections && $thissection->available) {
+	      echo $this->section_hidden($thissection, $course->id);
+	    }
+	    continue;
+	  }
+
+	  if (!$PAGE->user_is_editing()) {
+	    // Display section summary only.
+	    echo $this->section_summary($thissection, $course, null);
+	  } else {
+	    echo $this->section_header($thissection, $course, false, 0);
+	    if ($thissection->uservisible) {
+	      echo $this->courserenderer->course_section_cm_list($course, $thissection, 0);
+	      echo $this->courserenderer->course_section_add_cm_control($course, $thissection, 0);
+	    }
+	    echo $this->section_footer();
+	  }
+	  
+	  $children = course_get_format($course)->get_subsections($sectionnum);
+	  if (!empty($children) || $movingsection) {
+	    echo $this -> start_section_list();
+	    $this-> print_sections_recursive($course, $children);
+	    echo $this -> end_section_list();
+	  }
+
+	}
+	    
+	if ($PAGE->user_is_editing() and has_capability('moodle/course:update', $context)) {
+	  // Print stealth sections if present.
+	  foreach ($modinfo->get_section_info_all() as $section => $thissection) {
+	    if ($section <= $numsections or empty($modinfo->sections[$section])) {
+	      // this is not stealth section or it is empty
+	      continue;
+	    }
+	    echo $this->stealth_section_header($section);
+	    echo $this->courserenderer->course_section_cm_list($course, $thissection, 0);
+	    echo $this->stealth_section_footer();
+	  }
+
+	  echo $this->end_section_list();
+
+	  echo $this->change_number_sections($course, 0);
+
+	} else {
+	  echo $this->end_section_list();
+	}
+    }
+
+
     /**
      * Display section and all its activities and subsections (called recursively)
      *
@@ -121,11 +227,80 @@ class format_flexsections_renderer extends format_section_renderer_base {
      * @param int $sr section to return to (for building links)
      * @param int $level nested level on the page (in case of 0 also displays additional start/end html code)
      */
+
     public function display_section($course, $section, $sr, $level = 0) {
         global $PAGE;
         $course = course_get_format($course)->get_course();
         $section = course_get_format($course)->get_section($section);
         $context = context_course::instance($course->id);
+
+
+	// Title with completion help icon.
+	$completioninfo = new completion_info($course);
+	echo $completioninfo->display_help_icon();
+	echo $this->output->heading($this->page_title(), 2, 'accesshide');
+
+	// Copy activity clipboard..
+	echo $this->course_activity_clipboard($course, 0);
+
+	// Now the list of sections..
+	echo $this->start_section_list();
+
+	$this->print_section0($course);
+
+	$numsections = course_get_format($course)->get_last_section_number();
+        $sectionnum = $section->section;
+        $movingsection = course_get_format($course)->is_moving_section();
+
+	if ($sectionnum == 0) {
+	  $sections = course_get_format($course)->get_subsections($sectionnum);
+	} else {
+	  $sections = [ $section ];
+	}
+
+	$this -> print_sections_recursive($course, $sections, 0);
+
+	echo $this -> end_section_list();
+
+	return '';
+
+
+        if ($contentvisible && ($section->collapsed == FORMAT_FLEXSECTIONS_EXPANDED || !$level )) {
+
+            // display subsections
+            $children = course_get_format($course)->get_subsections($sectionnum);
+            if (!empty($children) || $movingsection) {
+                echo html_writer::start_tag('ul', array('class' =>
+							'flexsections flexsections-level-'.($level+1)));
+
+                foreach ($children as $num) {
+                    $this->display_insert_section_here($course, $section, $num, $sr);
+		    if ($num -> section > 0) {
+		      echo $this -> print_single_section_page_no_block0($course, NULL, NULL, NULL, NULL,
+									 $num -> section);
+		    }
+                }
+                $this->display_insert_section_here($course, $section, null, $sr);
+
+                echo html_writer::end_tag('ul'); // .flexsections
+
+            }
+            if ($addsectioncontrol = course_get_format($course)->get_add_section_control($sectionnum)) {
+                echo $this->render($addsectioncontrol);
+            }
+        }
+
+	return '';
+    }
+
+
+    public function foodisplay_section($course, $section, $sr, $level = 0) {
+
+        global $PAGE;
+        $course = course_get_format($course)->get_course();
+        $section = course_get_format($course)->get_section($section);
+        $context = context_course::instance($course->id);
+
         $contentvisible = true;
         if (!$section->uservisible || !course_get_format($course)->is_section_real_available($section)) {
             if ($section->visible && !$section->available && $section->availableinfo) {
@@ -137,6 +312,45 @@ class format_flexsections_renderer extends format_section_renderer_base {
         }
         $sectionnum = $section->section;
         $movingsection = course_get_format($course)->is_moving_section();
+
+
+	if ($sectionnum == 0 ) {
+	  if ( $level == 0) {
+	    echo $this -> print_single_section_page($course, NULL, NULL, NULL, NULL, $sectionnum);
+	  }
+	}
+
+        $modinfo = get_fast_modinfo($course);
+	echo "<pre>";  echo print_r($modinfo->sections); echo "</pre>";
+
+        if ($contentvisible && ($section->collapsed == FORMAT_FLEXSECTIONS_EXPANDED || !$level )) {
+
+            // display subsections
+            $children = course_get_format($course)->get_subsections($sectionnum);
+            if (!empty($children) || $movingsection) {
+                echo html_writer::start_tag('ul', array('class' =>
+							'flexsections flexsections-level-'.($level+1)));
+
+                foreach ($children as $num) {
+                    $this->display_insert_section_here($course, $section, $num, $sr);
+		    if ($num -> section > 0) {
+		      echo $this -> print_single_section_page_no_block0($course, NULL, NULL, NULL, NULL,
+									 $num -> section);
+		    }
+                }
+                $this->display_insert_section_here($course, $section, null, $sr);
+
+                echo html_writer::end_tag('ul'); // .flexsections
+
+            }
+            if ($addsectioncontrol = course_get_format($course)->get_add_section_control($sectionnum)) {
+                echo $this->render($addsectioncontrol);
+            }
+        }
+
+	return '';
+
+
         if ($level === 0) {
             $cancelmovingcontrols = course_get_format($course)->get_edit_controls_cancelmoving();
             foreach ($cancelmovingcontrols as $control) {
@@ -235,58 +449,9 @@ class format_flexsections_renderer extends format_section_renderer_base {
      * @param null|int|section_info $before number of section before which we want to insert (or null if in the end)
      */
     protected function display_insert_section_here($courseorid, $parent, $before = null, $sr = null) {
-        if ($control = course_get_format($courseorid)->get_edit_control_movehere($parent, $before, $sr)) {
+      if ($control = course_get_format($courseorid)->get_edit_control_movehere($parent, $before, $sr)) {
             echo $this->render($control);
-        }
-    }
-
-    /**
-     * renders HTML for format_flexsections_edit_control
-     *
-     * @param format_flexsections_edit_control $control
-     * @return string
-     */
-    protected function render_format_flexsections_edit_control(format_flexsections_edit_control $control) {
-        if (!$control) {
-            return '';
-        }
-        if ($control->class === 'movehere') {
-            $icon = new pix_icon('movehere', $control->text, 'moodle', array('class' => 'movetarget', 'title' => $control->text));
-            $action = new action_link($control->url, $icon, null, array('class' => $control->class));
-            return html_writer::tag('li', $this->render($action), array('class' => 'movehere'));
-        } else if ($control->class === 'cancelmovingsection' || $control->class === 'cancelmovingactivity') {
-            return html_writer::tag('div', html_writer::link($control->url, $control->text),
-                    array('class' => 'cancelmoving '.$control->class));
-        } else if ($control->class === 'addsection') {
-            $icon = new pix_icon('t/add', '', 'moodle', array('class' => 'iconsmall'));
-            $text = $this->render($icon). html_writer::tag('span', $control->text, array('class' => $control->class.'-text'));
-            $action = new action_link($control->url, $text, null, array('class' => $control->class));
-            return html_writer::tag('div', $this->render($action), array('class' => 'mdl-right'));
-        } else if ($control->class === 'backto') {
-            $icon = new pix_icon('t/up', '', 'moodle');
-            $text = $this->render($icon). html_writer::tag('span', $control->text, array('class' => $control->class.'-text'));
-            return html_writer::tag('div', html_writer::link($control->url, $text),
-                    array('class' => 'header '.$control->class));
-        } else if ($control->class === 'settings' || $control->class === 'marker' || $control->class === 'marked') {
-            $icon = new pix_icon('i/'. $control->class, $control->text, 'moodle', array('class' => 'iconsmall', 'title' => $control->text));
-        } else if ($control->class === 'move' || $control->class === 'expanded' || $control->class === 'collapsed' ||
-                $control->class === 'hide' || $control->class === 'show' || $control->class === 'delete') {
-            $icon = new pix_icon('t/'. $control->class, $control->text, 'moodle', array('class' => 'iconsmall', 'title' => $control->text));
-        } else if ($control->class === 'mergeup') {
-            $icon = new pix_icon('mergeup', $control->text, 'format_flexsections', array('class' => 'iconsmall', 'title' => $control->text));
-        }
-        if (isset($icon)) {
-            if ($control->url) {
-                // icon with a link
-                $action = new action_link($control->url, $icon, null, array('class' => $control->class));
-                return $this->render($action);
-            } else {
-                // just icon
-                return html_writer::tag('span', $this->render($icon), array('class' => $control->class));
-            }
-        }
-        // unknown control
-        return ' '. html_writer::link($control->url, $control->text, array('class' => $control->class)). '';
+      }
     }
 
     /**
